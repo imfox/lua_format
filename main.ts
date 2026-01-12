@@ -1,5 +1,8 @@
 import * as fs from "fs";
-let lua_code = fs.readFileSync("test.lua").toString();
+
+let lua_code = fs
+    .readFileSync("test.lua")
+    .toString();
 
 function format(code: string, lua_version: string = "lua51") {
     enum TokenType {
@@ -122,10 +125,8 @@ function format(code: string, lua_version: string = "lua51") {
                     mt = "0123456789";
                 } else {
                     if (end(at())) {
-                        if (neg) {
-                            console.log(at(), "11");
+                        if (neg)
                             return throw_error();
-                        }
                         break;
                     }
                 }
@@ -189,12 +190,13 @@ function format(code: string, lua_version: string = "lua51") {
     let close = ["end", "until", "}", ")", "]"];
 
     let isspace = (i: number) => ["\r\n", "\n", "\t", " "].indexOf(formatcode.at(-1)) >= 0;
+    function tryaddspace(i: number = -1) { formatcode += isspace(i) ? "" : " "; }
 
     let tabs = [];
     let tab = 0;
     let curlineTab = 0;
     while (tks.length) {
-        let tk = tks.pop();
+        let tk: string = tks.pop();
         let tt = tkt[tks.length];
         let ntk: string;
         let ntt: TokenType;
@@ -203,9 +205,10 @@ function format(code: string, lua_version: string = "lua51") {
             ntt = tkt.at(tks.length - 1);
         }
 
-        if (prespace.indexOf(tk) >= 0) {
-            if (!isspace(-1))
-                formatcode += " ";
+        if (tt == TokenType.Note) {
+            tryaddspace(-1)
+        } else if (prespace.indexOf(tk) >= 0) {
+            tryaddspace(-1)
         }
         formatcode += tk;
 
@@ -227,19 +230,23 @@ function format(code: string, lua_version: string = "lua51") {
             }
             tab += curlineTab ? (curlineTab / Math.abs(curlineTab)) : 0;
             curlineTab = 0;
-            let isClose = ["elseif", "else"].indexOf(ntk) >= 0 || close.indexOf(ntk) >= 0;
+            let isClose = ["elseif", "else", "then"].indexOf(ntk) >= 0 || close.indexOf(ntk) >= 0;
             formatcode += (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
         } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
             if (!(!ntk || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
-                formatcode += " ";
+                tryaddspace(-1)
             }
         } else if (sufspace.indexOf(tk) >= 0) {
-            if (!isspace(-1))
-                formatcode += " ";
+            tryaddspace(-1)
         } else {
             if ([TokenType.String, TokenType.Number, TokenType.Value].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.Value].indexOf(ntt) >= 0) { //这里错误了
-                if (!isspace(-1))
-                    formatcode += " ";
+                tryaddspace(-1)
+            }
+        }
+
+        if (tt == TokenType.Note) {
+            if (tk.trim().startsWith("---@align")) {
+
             }
         }
     }
