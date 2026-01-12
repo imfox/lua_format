@@ -58,7 +58,7 @@ function format(code: string, lua_version: string = "lua51") {
                         tk += shift();
                     }
                     if (end) {
-                        tk += shift() + shift() + shift() + shift();
+                        tk += shift() + shift();
                     }
                 } else {
                     while (!line(at())) {
@@ -195,6 +195,40 @@ function format(code: string, lua_version: string = "lua51") {
     let tabs = [];
     let tab = 0;
     let curlineTab = 0;
+
+    function align() {
+        let prespace = (" ".repeat(4)).repeat(Math.max(0, tab));
+        formatcode += tks.pop();  // \n
+
+        let arr = [];
+        while (tks.length > 0) {
+            arr.push(tks.pop())
+            arr.push(tks.pop())
+            arr.push(tks.pop())
+            if (tkt[tks.length - 1] != TokenType.Symbol) {
+                break;
+            }
+            arr.push(tks.pop());
+            if (tkt[tks.length - 1] == TokenType.Note) {
+                arr.push(tks.pop())
+            } else {
+                arr.push("");
+            }
+            if (tks.at(-1) == "\n") tks.pop();
+            if (tks.at(-1) == "}") break;
+        }
+        let kw = 0, vw = 0;
+        for (let i = 0; i < arr.length; i += 5) {
+            kw = Math.max(arr[i].length, kw);
+            vw = Math.max(arr[i + 2].length, vw);
+        }
+        for (let i = 0; i < arr.length; i += 5) {
+            formatcode += `${prespace}${arr[i]}${" ".repeat(kw - arr[i].length + 1)}${arr[i + 1]} ${arr[i + 2]}${" ".repeat(vw - arr[i + 2].length)}${arr[i + 3]} ${arr[i + 4]}\n`;
+        }
+        console.log(kw, vw);
+        console.log(arr);
+    }
+
     while (tks.length) {
         let tk: string = tks.pop();
         let tt = tkt[tks.length];
@@ -246,7 +280,9 @@ function format(code: string, lua_version: string = "lua51") {
 
         if (tt == TokenType.Note) {
             if (tk.trim().startsWith("---@align")) {
-
+                if (statcks.at(-1) == "{") { //table
+                    align();
+                }
             }
         }
     }
