@@ -4,16 +4,18 @@ let lua_code = fs
     .readFileSync("test.lua")
     .toString();
 
-type IToken = { value: string, type: TokenType, offset?: number, flags?: string };
-enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, };
+type IToken = { value: string, type: TokenType, offset?: number, flags?: string, block?: number };
+enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Line };
 
 class Tokenize {
     _raw: string;
     public _offset: number;
     protected _size: number;
     protected _offsetStacks: number[];
+    protected _block: number;
 
     constructor(raw: any) {
+        this._block = 0;
         this._offsetStacks = [];
         this._raw = raw as any;
         this._offset = 0;
@@ -53,12 +55,41 @@ class Tokenize {
     is_symbol_h(offset: number = 0) { return this.some("+-*/&|><^%=", offset); }
     is_space_h(offset: number = 0) { return this.some("\t ", offset); }
     is_note_h(offset: number = 0) { return this.is("--", offset); }                                   // --, --[[
+    is_line_h(offset: number = 0) { return this.some("\r\n", offset); }
     is_str_h(offset: number = 0) { return this.some(`'"`, offset) || this.is("[[", offset); }
     is_id_h(offset: number = 0) { return this.is("_", offset) || this.a2z(offset); }                  // _a, a
     is_num_h(offset: number = 0) {
         return (this.is("-", offset) && ((this.num_10(offset + 1) || this.at(offset + 1) == ".")))    // -.1, -1, -0x
             || this.num_10(offset)                                                                    // 123, 0123
             || (this.at(offset) == "." && this.num_10(offset + 1));                                   // .1
+    }
+
+    try_read_line() {
+        this.read_space();
+        if (this.is_line_h()) {
+            if (this.is("\r\n")) {
+                this.shift(2);
+            } else if (this.is("\n")) {
+                this.shift(1);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    try_read_key(ti: IToken) {
+        this.read_space();
+        if (this.is_id_h()) {
+            this.read_id(ti);
+            return true;
+        } else if (this.is_num_h()) {
+            this.read_num(ti);
+            return true;
+        } else if (this.is_str_h()) {
+            this.read_str(ti);
+            return true;
+        }
+        return false;
     }
 
     read_end(ti: IToken) {
@@ -68,6 +99,7 @@ class Tokenize {
         } while (!this.is_space_h());
         return true;
     }
+
     read_id(ti: IToken) {
         let char: string;
         do {
@@ -109,10 +141,10 @@ class Tokenize {
 
     read_space(ti?: IToken) {
         let char: string;
-        do {
+        while (this.is_space_h()) {
             char = this.shift();
             ti && (ti.value += char);
-        } while (this.is_space_h());
+        }
         ti && (ti.type = TokenType.ID);
         return true;
     }
@@ -160,8 +192,7 @@ class Tokenize {
 
     take(): IToken {
         let ti: IToken = { value: "", type: TokenType.Symbol, };
-        if (this.is_space_h())
-            this.read_space();
+        if (this.is_space_h()) this.read_space();
 
         if (this.eof()) {
             ti.type = TokenType.Eof;
@@ -171,18 +202,49 @@ class Tokenize {
             this.read_num(ti);
         } else if (this.is("...")) {
             ti.value = this.shift(3);
-        } else if (["..", "::", ">>", "<<", "//", "\r\n", ">=", "<=", "==", "~="/** , "!=","++","--","+=","-=" */].some(k => this.is(k))) {
+        } else if (this.is_line_h()) {
+            if (this.is("\r\n")) {
+                ti.value = this.shift(2);
+            } else if (this.is("\n")) {
+                ti.value = this.shift(1);
+            }
+            ti.type = TokenType.Line;
+        } else if (["..", "::", ">>", "<<", "//", ">=", "<=", "==", "~="/** , "!=","++","--","+=","-=" */].some(k => this.is(k))) {
             ti.value = this.shift(2);
         } else if (this.is_str_h()) {
             this.read_str(ti);
         } else if (this.is_id_h()) {
             this.read_id(ti);
-        } else if (this.some("\n(){}[]+-*/,><=;:#.^%&|~")) {
+        } else if (this.some("(){}[]+-*/,><=;:#.^%&|~")) {
             ti.value = this.shift(1);
+            let bks = ["function", "if", "(", "{", "[", "0", "]", "}", ")", "end", "end"]; //"({[0]})";
+            let bi = bks.indexOf(ti.value);
+            if (bi >= 0 && bks.length % 2) {
+                let v = -((bi + 1) - Math.ceil(bks.length / 2));
+                this._block += v / Math.abs(v);
+            }
+            if (ti.value == "{") { //block begin
+                this.save();
+                do {
+                    this.try_read_line();
+                    let dk: IToken = { value: "", type: TokenType.Error };
+                    if (!this.try_read_key(dk)) break;
+
+                    let sp: IToken = { value: "", type: TokenType.Error };
+                    this.read_space(sp);
+                    if (sp.value.length < 2) break;
+                    if (!this.is_symbol_h() || !this.is("=")) break;
+
+                    ti.flags = "---@align";
+                    // console.log("是一个key", dk)
+                } while (false);
+                this.restore();
+            }
         } else {
             ti.type = TokenType.Error;
             ti.value = this.at();
         }
+        ti.block = this._block;
         return ti;
     }
 }
@@ -202,10 +264,16 @@ function format(code: string, options?: { lua_version?: string, space?: number }
         let it = tker.take();
         tokens.push(it);
         if (it.type == TokenType.Error) {
+            console.log("---------------------------------- Error ----------------------------------")
             console.log(it);
             suftext = code.substring(tker._offset, code.length);
             break;
         }
+
+        if (it.type != TokenType.Line) {
+            // console.log(it.block);
+        }
+
         if (--limit <= 0)  // 防止解析逻辑死循环 正常来说不会发生
             break;
     }
@@ -250,7 +318,7 @@ function format(code: string, options?: { lua_version?: string, space?: number }
             } else {
                 arr.push("");
             }
-            if (tks.at(-1) == "\n") tks.pop();
+            if (tks.at(-1) == "\n" || tks.at(-1) == "\r\n") tks.pop();
             if (tks.at(-1) == "}") break;
         }
         let kw = 0, vw = 0;
@@ -295,7 +363,7 @@ function format(code: string, options?: { lua_version?: string, space?: number }
             curlineTab--;
             statcks.pop();
         }
-        if (tk == "\r\n" || tk == "\n") {
+        if (tt == TokenType.Line) {
             if (curlineTab > 0) {
                 tabs.push(curlineTab);
             } else if (curlineTab < 0) {
@@ -310,7 +378,7 @@ function format(code: string, options?: { lua_version?: string, space?: number }
             tab += curlineTab ? (curlineTab / Math.abs(curlineTab)) : 0;
             curlineTab = 0;
             let isClose = ["elseif", "else", "then"].indexOf(ntk) >= 0 || close.indexOf(ntk) >= 0;
-            if (!(ntk == "\r\n" || ntk == "\n")) { //下一行有内容的时候才添加tab
+            if (!(ntt == TokenType.Line)) { //下一行有内容的时候才添加tab
                 formatcode += (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
             }
         } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
