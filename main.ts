@@ -4,237 +4,223 @@ let lua_code = fs
     .readFileSync("test.lua")
     .toString();
 
-function format(code: string, lua_version: string = "lua51") {
-    enum TokenType { None, Value, String, Number, Symbol, Note, };
+type IToken = { value: string, type: TokenType, offset?: number, flags?: string };
+enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, };
 
-    let statcks = [];
-    let j = 0;
-    let t = code;
-    let isABC = (charCode: number) => charCode >= 97 && charCode <= 122 || charCode >= 65 && charCode <= 90;
-    function shift(i: number = 1): string { j += i; return t.substring(j - i, j)!; }
-    function at(i = 0) { return t.at(j + i); }
-    function white(char: string) { return "\t ".indexOf(char) >= 0; }
-    function num(char: string) { return "0123456789".indexOf(char) >= 0; }
-    function is(text: string) { return (j + text.length < t.length) ? t.substring(j, j + text.length) == text : false; }
-    function line(char: string) { return !char || char == "\n" || char == "\r"; }
-    function end(char: string) { return !char || "\t\r\n+-*/><=~^,.;)}] ".indexOf(char) >= 0; }
+class Tokenize {
+    _raw: string;
+    public _offset: number;
+    protected _size: number;
+    protected _offsetStacks: number[];
 
-    type IToken = { value: string, type: TokenType, row?: number, col?: number, index?: number, flags?: string };
+    constructor(raw: any) {
+        this._offsetStacks = [];
+        this._raw = raw as any;
+        this._offset = 0;
+        this._size = raw.length;
+    }
 
-    let col = 0;
-    let row = 0;
-    let pStart = 0;
+    public save() { this._offsetStacks.push(this._offset); }
+    public restore() { return this._offset = this._offsetStacks.pop(); }
 
-    function throw_error(token: IToken) {
-        let ei = j;
-        j = pStart;
-        token.type = TokenType.None;
-        token.index = ei;
-        token.row = row;
-        token.col = col;
+    eof(offset: number = 0) { return (this._offset + offset) >= this._size; }
+    at(index: number = 0) { return this._raw.at(this._offset + index); }
+
+    shift(size: number = 1) {
+        this._offset += size;
+        return this._raw.slice(this._offset - size, this._offset);
+    }
+
+
+    is(t: string, offset: number = 0) {
+        for (let i = 0; i < t.length; i++)
+            if (t.at(i) != this.at(offset + i))
+                return false;
+        return true;
+        // return this._raw.substring(this._offset, this._offset + t.length) == t;
+    }
+
+    charCodeAt(offset: number = 0) { return this.eof(offset) ? -1 : this.at(offset).charCodeAt(0); }
+    some(t: string, offset: number = 0) { return t.indexOf(this.at(offset)) >= 0; }
+
+    line_or_eof(offset: number = 0) { return this.eof(offset) || this.some("\r\n", offset); };
+    num_8(offset: number = 0) { return this.some("01234567", offset); }
+    num_10(offset: number = 0) { return this.some("0123456789", offset); }
+    num_16(offset: number = 0) { return this.some("0123456789abcdefABCDEF", offset); }
+    num_end(offset: number = 0) { return this.eof(offset) || this.some(" \t\r\n+-*/&|><=~^%,;)}]", offset); }
+    a2z(offset: number = 0) { let code = this.charCodeAt(offset); return code >= 97 && code <= 122 || code >= 65 && code <= 90 }
+
+    is_symbol_h(offset: number = 0) { return this.some("+-*/&|><^%=", offset); }
+    is_space_h(offset: number = 0) { return this.some("\t ", offset); }
+    is_note_h(offset: number = 0) { return this.is("--", offset); }                                   // --, --[[
+    is_str_h(offset: number = 0) { return this.some(`'"`, offset) || this.is("[[", offset); }
+    is_id_h(offset: number = 0) { return this.is("_", offset) || this.a2z(offset); }                  // _a, a
+    is_num_h(offset: number = 0) {
+        return (this.is("-", offset) && ((this.num_10(offset + 1) || this.at(offset + 1) == ".")))    // -.1, -1, -0x
+            || this.num_10(offset)                                                                    // 123, 0123
+            || (this.at(offset) == "." && this.num_10(offset + 1));                                   // .1
+    }
+
+    read_end(ti: IToken) {
+        let char: string;
+        do {
+            ti.value += char = this.shift();
+        } while (!this.is_space_h());
+        return true;
+    }
+    read_id(ti: IToken) {
+        let char: string;
+        do {
+            ti.value += char = this.shift();
+        } while (this.a2z() || this.num_10() || this.is("_"));
+        ti.type = TokenType.ID;
+        return true;
+    }
+
+    read_str(ti: IToken) {
+        ti.type = TokenType.String;
+        let eof_: boolean;
+        let closed = this.is("[[") ? "]]" : this.at();
+        let ec = closed.length > 1 ? this.eof.bind(this) : this.line_or_eof.bind(this);
+        ti.value += this.shift();
+        while (!this.is(closed) && !(eof_ = ec())) {
+            if (this.is("\\"))
+                ti.value += this.shift();
+            ti.value += this.shift();
+        }
+        if (!eof_)
+            ti.value += this.shift(closed.length);
+        return true;
+    }
+
+    read_note(ti: IToken) {
+        if (this.is("--[[")) { //块注释
+            let close: boolean;
+            while (!(close = this.is("]]")) && !this.eof())
+                ti.value += this.shift();
+            if (close)
+                ti.value += this.shift(2);
+        } else {
+            while (!this.line_or_eof())
+                ti.value += this.shift();
+        }
+        ti.type = TokenType.Note;
+    }
+
+    read_space(ti?: IToken) {
+        let char: string;
+        do {
+            char = this.shift();
+            ti && (ti.value += char);
+        } while (this.is_space_h());
+        ti && (ti.type = TokenType.ID);
+        return true;
+    }
+
+    read_num(ti: IToken) {
+        this.save();
+        ti.type = TokenType.Number;
+        let hex = false, flo = 0;
+        if (this.is("-")) ti.value += this.shift();
+        let is_num: Function = this.num_10.bind(this);
+        if (this.is("0")) {
+            ti.value += this.shift();
+            if (this.some("Xx")) { //16进制
+                ti.value += this.shift();
+                is_num = this.num_16.bind(this);
+                hex = true;
+            }
+        } else if (this.num_10()) {
+            ti.value += this.shift();
+        }
+        if (!hex && this.is(".") && !this.is("..")) { //10进制及以下
+            flo++;
+            ti.value += this.shift();
+        }
+        while (is_num()) {
+            ti.value += this.shift();
+            if (!this.is("..") && this.is("."))
+                if (flo)
+                    break;
+                else {
+                    ti.value += this.shift();
+                    flo++;
+                }
+        }
+        if (!this.num_end() && !this.is(".."))
+            return this.throw_error(ti, this.restore());
+        return true;
+    };
+
+    private throw_error(ti: IToken, index: number) {
+        ti.type = TokenType.Error;
+        ti.offset = index;
         return false;
     }
 
-    function read_num(ti: IToken) {
-        ti.type = TokenType.Number;
-        let char = at();
-        let neg = char == "-";
-        let flo = char == ".";
-        let dot = 0;
-        if (neg) {
-            ti.value = shift()
-            char = at();
-        } else if (flo) {
-            char = at();
-        }
-        let mt = "";
-        if (char == "0" && at(1) != ".") { //8进制
-            ti.value += shift();
-            mt = "01234567"
-            if (at() == "x") { //16进制
-                ti.value += shift();
-                mt = "0123456789abcdef";
-            }
-        } else if (char == "." || num(at())) { //10进制
-            dot = 1;
-            ti.value += shift();
-            mt = "0123456789";
+    take(): IToken {
+        let ti: IToken = { value: "", type: TokenType.Symbol, };
+        if (this.is_space_h())
+            this.read_space();
+
+        if (this.eof()) {
+            ti.type = TokenType.Eof;
+        } else if (this.is_note_h()) {
+            this.read_note(ti);
+        } else if (this.is_num_h()) {
+            this.read_num(ti);
+        } else if (this.is("...")) {
+            ti.value = this.shift(3);
+        } else if (["..", "::", ">>", "<<", "//", "\r\n", ">=", "<=", "==", "~="/** , "!=","++","--","+=","-=" */].some(k => this.is(k))) {
+            ti.value = this.shift(2);
+        } else if (this.is_str_h()) {
+            this.read_str(ti);
+        } else if (this.is_id_h()) {
+            this.read_id(ti);
+        } else if (this.some("\n(){}[]+-*/,><=;:#.^%&|~")) {
+            ti.value = this.shift(1);
         } else {
-            if (end(at())) {
-                if (neg)
-                    return throw_error(ti);
-                return true;
-            }
-        }
-        while (mt.indexOf(at()) >= 0 || (dot <= 0 && at() == ".")) {
-            ti.value += shift();
-        }
-        if (!end(at()))
-            return throw_error(ti);
-        return true;
-    };
-
-    function read_string(ti: IToken) {
-        let char = at();
-        ti.type = TokenType.String;
-        ti.value = shift();
-        while (at() != char && !line(at())) {
-            if (at() == "\\")
-                ti.value += shift();
-            ti.value += shift();
-        }
-        if (char == at()) {
-            ti.value += shift();
-        }
-        return true;
-    }
-
-    function read_key(ti: IToken) {
-        let char = at();
-        do {
-            ti.value += char;
-            char = t.at(++j)!;
-        } while (char == "_" || num(char) || isABC(char?.codePointAt(0)!));
-        ti.type = TokenType.Value;
-        return true;
-    };
-
-    function read_space() {
-        let s = "";
-        while ("\t ".indexOf(at()) >= 0) {
-            s += shift();
-        }
-        return s;
-    }
-
-    function token() {
-        pStart = j;
-        let ti: IToken = { value: "", type: TokenType.None, };
-
-        while (j < t.length) {
-            if (j >= 70808) {
-                console.log("1")
-            }
-            let char = t.at(j)!;
-            if (is("--")) {
-                if (is("--[[")) { //块注释
-                    ti.value += shift(4);
-                    let end: boolean;
-                    while (!(end = is("]]")) && j < t.length) {
-                        ti.value += shift();
-                    }
-                    if (end) {
-                        ti.value += shift() + shift();
-                    }
-                } else {
-                    while (!line(at())) {
-                        ti.value += shift();
-                    }
-                }
-                ti.type = TokenType.Note;
-                break;
-            } else if (is("...")) {
-                ti.value = shift() + shift() + shift();
-                ti.type = TokenType.Symbol;
-                break;
-            } else if (is("..") || is("::") || is(">>") || is("<<") || is("//")) {
-                ti.value = shift() + shift();
-                ti.type = TokenType.Symbol;
-                break;
-            } else if (char == "_" || isABC(char?.codePointAt(0)!)) {
-                read_key(ti);
-                break;
-            } else if (char == '"' || char == "'") {
-                read_string(ti);
-                break;
-            } else if (white(char)) {
-                shift();
-            } else if ("><=~".indexOf(char) >= 0 && at(1) == "=") {
-                ti.value = shift() + shift();
-                ti.type = TokenType.Symbol;
-                break;
-            } else if ((char == "-") && (num(at(1)) || at(1) == ".") || num(char) || (num(at(1)) && at() == ".")) { // 0x, -0x, -.1, -1.1 
-                read_num(ti);
-                break;
-            } else if (char == "\r") {
-                ti.value = shift();
-                if (at() == "\n") {
-                    ti.value += shift();
-                }
-                ti.type = TokenType.Symbol;
-                break;
-            } else if ("\n(){}[]+-*/,><=;:#.^%&|~".indexOf(char) >= 0) {
-                ti.value = shift();
-                if (ti.value == "{") { //花括号可以检查是否需要自动对齐
-                    let p = j; //先记录原先的位置
-                    let ok = false;
-                    do {
-                        read_space();
-                        if (!line(at())) { //换行符 
-                            console.log("不是 换行符 ")
-                            break;
-                        }
-                        shift(); // \r\n
-                        read_space();
-                        let key: IToken = {} as any;
-                        if (!read_key(key)) {
-                            console.log("不是 key ")
-                            break;
-                        }
-                        if (read_space().length <= 1) {
-                            break;
-                        }
-                        if (at() != "=") break;
-                        shift();
-
-                        read_space();
-
-                        let tv: IToken = {} as any;
-                        if (!(read_num(tv) || read_string(tv) || read_key(tv))) {
-                            break;
-                        }
-
-                        ok = true;
-                    } while (false);
-                    j = p;
-                    if (ok)
-                        ti.flags = "---@align";
-                }
-                ti.type = TokenType.Symbol;
-                break;
-            } else {
-                console.log("未识别: " + char);
-                j++;
-                ti.type = TokenType.None;
-            }
+            ti.type = TokenType.Error;
+            ti.value = this.at();
         }
         return ti;
     }
+}
 
-    let formatcode = "";
+function format(code: string, options?: { lua_version?: string, space?: number }) {
+    if (!options) {
+        options = {}
+        if (!options.space) options.space = 4;
+    }
+
+    let tker = new Tokenize(code);
 
     let tokens: IToken[] = [];
     let suftext: string = "";
-    while (j < code.length) {
-        let tk = token();
-        if (tk.type == TokenType.None) {
-            console.log(tk);
-            console.log(j);
-            suftext = code.substring(j, code.length);
+    let limit = code.length;
+    while (!tker.eof()) {
+        let it = tker.take();
+        tokens.push(it);
+        if (it.type == TokenType.Error) {
+            console.log(it);
+            suftext = code.substring(tker._offset, code.length);
             break;
-        } else {
-            tokens.push(tk);
         }
+        if (--limit <= 0)  // 防止解析逻辑死循环 正常来说不会发生
+            break;
     }
+
+    let statcks = [];
+    let formatcode = "";
 
     let tks = tokens.map(d => d.value).reverse();
     let tkt = tokens.map(d => d.type).reverse();
 
-    let prespace = [">>", "<<", "..", "%", "return", "do", "end", "+", "-", "*", "/", "<", ">", "^", "=", ">=", "<=", "==", "~=", "<", ">", "and", "or", "then"];
-    let sufspace = ["goto", ">>", "<<", "until", "break", "repeat", "..", ";", "%", , ",", "for", "then", "not", "if", "else", "elseif", "function", "and", "or", "do", "while", "end", "return", "local", "+", "-", "*", "/", "<", ">", "^", "=", ">=", "<=", "==", "~=", ".."];
+    let prespace = ['&', '|', '%', "^", '*', '+', '-', '..', "//", '/', '<', '<', '<<', '<=', '=', '==', '>', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '~='];
+    let sufspace = ['&', '|', '%', , "^", '*', '+', ',', '-', "//", '..', '..', '/', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'then', 'until', 'while', '~='];
 
-    let open = ["function", "do", "repeat", "if", "{", "(", "["];
-    let close = ["end", "until", "}", ")", "]"];
+    let open = ['(', '[', 'do', 'function', 'if', 'repeat', '{'];
+    let close = [')', ']', 'end', 'until', '}'];
 
     let isspace = (i: number) => ["\r\n", "\n", "\t", " "].indexOf(formatcode.at(-1)) >= 0;
     function tryaddspace(i: number = -1) { formatcode += isspace(i) ? "" : " "; }
@@ -249,7 +235,7 @@ function format(code: string, lua_version: string = "lua51") {
 
         let arr = [];
         while (tks.length > 0) {
-            if (tkt.at(tks.length - 1) != TokenType.Value) {
+            if (tkt.at(tks.length - 1) != TokenType.ID) {
                 break;
             }
             arr.push(tks.pop())
@@ -279,6 +265,7 @@ function format(code: string, lua_version: string = "lua51") {
         console.log(arr);
     }
 
+    let row = 0, line_start_pos = 0;
     while (tks.length) {
         let tk: string = tks.pop();
         let tt = tkt[tks.length];
@@ -289,7 +276,12 @@ function format(code: string, lua_version: string = "lua51") {
             ntt = tkt.at(tks.length - 1);
         }
 
-        if (tt == TokenType.Note) {
+        if (tt == TokenType.Error) {
+            console.log(`Uncaught SyntaxError: Invalid or unexpected token "${tk}" ${row + 1}:${formatcode.length - line_start_pos}`)
+            break;
+        } else if (tt == TokenType.Eof) {
+            break;
+        } else if (tt == TokenType.Note) {
             tryaddspace(-1)
         } else if (prespace.indexOf(tk) >= 0) {
             tryaddspace(-1)
@@ -312,10 +304,15 @@ function format(code: string, lua_version: string = "lua51") {
                     tab--;
                 }
             }
+
+            line_start_pos = formatcode.length;
+            row++;
             tab += curlineTab ? (curlineTab / Math.abs(curlineTab)) : 0;
             curlineTab = 0;
             let isClose = ["elseif", "else", "then"].indexOf(ntk) >= 0 || close.indexOf(ntk) >= 0;
-            formatcode += (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
+            if (!(ntk == "\r\n" || ntk == "\n")) { //下一行有内容的时候才添加tab
+                formatcode += (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
+            }
         } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
             if (!(!ntk || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
                 tryaddspace(-1)
@@ -323,7 +320,7 @@ function format(code: string, lua_version: string = "lua51") {
         } else if (sufspace.indexOf(tk) >= 0) {
             tryaddspace(-1)
         } else {
-            if ([TokenType.String, TokenType.Number, TokenType.Value].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.Value].indexOf(ntt) >= 0) { //这里错误了
+            if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt) >= 0) { //这里错误了
                 tryaddspace(-1)
             }
         }
