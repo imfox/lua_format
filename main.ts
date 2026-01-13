@@ -78,7 +78,7 @@ function format(code: string, lua_version: string = "lua51") {
         let char = at();
         ti.type = TokenType.String;
         ti.value = shift();
-        while (at() != char) {
+        while (at() != char && !line(at())) {
             if (at() == "\\")
                 ti.value += shift();
             ti.value += shift();
