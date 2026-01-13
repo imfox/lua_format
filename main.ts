@@ -92,14 +92,6 @@ class Tokenize {
         return false;
     }
 
-    read_end(ti: IToken) {
-        let char: string;
-        do {
-            ti.value += char = this.shift();
-        } while (!this.is_space_h());
-        return true;
-    }
-
     read_id(ti: IToken) {
         let char: string;
         do {
@@ -249,7 +241,7 @@ class Tokenize {
     }
 }
 
-function format(code: string, options?: { lua_version?: string, space?: number }) {
+function format(code: string, options?: { space?: number }) {
     if (!options) {
         options = {}
         if (!options.space) options.space = 4;
@@ -270,10 +262,6 @@ function format(code: string, options?: { lua_version?: string, space?: number }
             break;
         }
 
-        if (it.type != TokenType.Line) {
-            // console.log(it.block);
-        }
-
         if (--limit <= 0)  // 防止解析逻辑死循环 正常来说不会发生
             break;
     }
@@ -284,14 +272,14 @@ function format(code: string, options?: { lua_version?: string, space?: number }
     let tks = tokens.map(d => d.value).reverse();
     let tkt = tokens.map(d => d.type).reverse();
 
-    let prespace = ['&', '|', '%', "^", '*', '+', '-', '..', "//", '/', '<', '<', '<<', '<=', '=', '==', '>', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '~='];
-    let sufspace = ['&', '|', '%', , "^", '*', '+', ',', '-', "//", '..', '..', '/', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'then', 'until', 'while', '~='];
+    let prespace = ['%', '&', '*', '+', '-', '..', '/', '//', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|', '~='];
+    let sufspace = ['%', '&', '*', '+', ',', '-', '..', '/', '//', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|', '~='];
 
     let open = ['(', '[', 'do', 'function', 'if', 'repeat', '{'];
     let close = [')', ']', 'end', 'until', '}'];
 
     let isspace = (i: number) => ["\r\n", "\n", "\t", " "].indexOf(formatcode.at(-1)) >= 0;
-    function tryaddspace(i: number = -1) { formatcode += isspace(i) ? "" : " "; }
+    function try_add_space(i: number = -1) { formatcode += isspace(i) ? "" : " "; }
 
     let tabs = [];
     let tab = 0;
@@ -350,9 +338,9 @@ function format(code: string, options?: { lua_version?: string, space?: number }
         } else if (tt == TokenType.Eof) {
             break;
         } else if (tt == TokenType.Note) {
-            tryaddspace(-1)
+            try_add_space(-1)
         } else if (prespace.indexOf(tk) >= 0) {
-            tryaddspace(-1)
+            try_add_space(-1)
         }
         formatcode += tk;
 
@@ -383,13 +371,13 @@ function format(code: string, options?: { lua_version?: string, space?: number }
             }
         } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
             if (!(!ntk || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
-                tryaddspace(-1)
+                try_add_space(-1)
             }
         } else if (sufspace.indexOf(tk) >= 0) {
-            tryaddspace(-1)
+            try_add_space(-1)
         } else {
             if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt) >= 0) { //这里错误了
-                tryaddspace(-1)
+                try_add_space(-1)
             }
         }
 
