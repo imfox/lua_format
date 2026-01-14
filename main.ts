@@ -6,7 +6,7 @@ let lua_code = fs
 
 namespace lua_format {
     type IToken = { value: string, type: TokenType, offset?: number, flags?: string, block?: number };
-    enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Line, Space };
+    enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Line };
 
     class Tokenize {
         _raw: string;
@@ -138,7 +138,7 @@ namespace lua_format {
                 char = this.shift();
                 ti && (ti.value += char);
             }
-            ti && (ti.type = TokenType.Space);
+            ti && (ti.type = TokenType.Symbol);
             return true;
         }
 
@@ -184,11 +184,28 @@ namespace lua_format {
             return false;
         }
 
+        private align_test(ti: IToken) {
+            this.save(); //这里会试着寻找满足自动对齐的条件
+            do { // 这里其实可以加一个判定 如果已经在对齐的过程中 那么不需要再次做判断
+                let dk: IToken = { value: "", type: TokenType.Error };
+                if (!this.try_read_key(dk)) break;
+                if ((dk.value == "local" || dk.value == "global") && !this.try_read_key(dk)) break;
+
+                let sp: IToken = { value: "", type: TokenType.Error };
+                this.read_space(sp);
+                if (sp.value.length < 2) break;
+                if (!this.is_symbol_h() || !this.is("=")) break;
+
+                ti.flags = "---@align";
+            } while (false);
+            this.restore();
+        }
+
         take(): IToken {
             let ti: IToken = { value: "", type: TokenType.Symbol, };
-            if (this.is_space_h()) {
-                this.read_space(ti);
-            } else if (this.eof()) {
+            if (this.is_space_h()) this.read_space();
+
+            if (this.eof()) {
                 ti.type = TokenType.Eof;
             } else if (this.is_note_h()) {
                 this.read_note(ti);
@@ -197,12 +214,9 @@ namespace lua_format {
             } else if (this.is("...")) {
                 ti.value = this.shift(3);
             } else if (this.is_line_h()) {
-                if (this.is("\r\n")) {
-                    ti.value = this.shift(2);
-                } else /** if (this.is("\n")) */ {
-                    ti.value = this.shift(1);
-                }
+                ti.value = this.is("\r\n") ? this.shift(2) : this.shift(1);
                 ti.type = TokenType.Line;
+                this.align_test(ti);
             } else if (["..", "::", ">>", "<<", "//", ">=", "<=", "==", "~="/** , "!=","++","--","+=","-=" */].some(k => this.is(k))) {
                 ti.value = this.shift(2);
             } else if (this.is_str_h()) {
@@ -217,23 +231,6 @@ namespace lua_format {
                     let v = -((bi + 1) - Math.ceil(bks.length / 2));
                     this._block += v / Math.abs(v);
                 }
-                if (ti.value == "{") { //block begin
-                    this.save();
-                    do {
-                        this.try_read_line();
-                        let dk: IToken = { value: "", type: TokenType.Error };
-                        if (!this.try_read_key(dk)) break;
-
-                        let sp: IToken = { value: "", type: TokenType.Error };
-                        this.read_space(sp);
-                        if (sp.value.length < 2) break;
-                        if (!this.is_symbol_h() || !this.is("=")) break;
-
-                        ti.flags = "---@align";
-                        // console.log("是一个key", dk)
-                    } while (false);
-                    this.restore();
-                }
             } else {
                 ti.type = TokenType.Error;
                 ti.value = this.at();
@@ -243,46 +240,124 @@ namespace lua_format {
         }
     }
 
-
-
-    let prespace = ['%', '&', '*', '+', '-', '..', '/', '//', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|', '~='];
-    let sufspace = ['%', '&', '*', '+', ',', '-', '..', '/', '//', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|', '~='];
+    const prespace = ['%', '&', '*', '+', '-', '..', '/', '//', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|', '~='];
+    const sufspace = ['%', '&', '*', '+', ',', '-', '..', '/', '//', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|', '~='];
 
     let open = ['(', '[', 'do', 'function', 'if', 'repeat', '{'];
     let close = [')', ']', 'end', 'until', '}'];
 
-    function format_token(tokens: IToken[]) {
-        let formatcode = "";
+    type FormatError = { row: number, col: number, token: IToken, msg: string };
+    type FormatState = { formatcode: string, cur: number, row: number, line_start_pos: number, tokens: IToken[], error?: FormatError };
+
+    function align(prespace: string, formatstate: FormatState): number {
+        let tokens = formatstate.tokens;
+        let j = formatstate.cur;
+        let list = [];
+        let lineCount = 0;
+        let lastJ: number = j;
+        for (; j < tokens.length;) {
+            let kl = 0;
+            let sk = tokens[j].value == "[";
+            let block = tokens[j].block - (sk ? 1 : 0);
+            if (sk) {
+                j++;
+                if ([TokenType.ID, TokenType.String, TokenType.Number].indexOf(tokens[j].type) >= 0) j++; else break;
+                if (tokens[j].value == "]") j++; else break;
+                kl = 3;
+            } else if (tokens[j].type == TokenType.ID) {
+                let v = tokens[j].value;
+                kl = 1;
+                j++;
+                if ((v == "local" || v == "global") && tokens[j].type == TokenType.ID) {
+                    kl = 2;
+                    j++;
+                }
+            } else
+                break;
+            if (tokens[j].value == "=") j++; else break;
+
+            let vl = 0;
+            while ([TokenType.Eof, TokenType.Line, TokenType.Error].indexOf(tokens[j].type) == -1) {
+                vl++;
+                j++;
+            }
+
+            if (tokens[j].block != block) break;
+            if (tokens[j].type == TokenType.Error) break;
+            if (tokens[j].type == TokenType.Line) j++; //吃掉本行的结尾
+
+            lineCount++;
+            list.push(kl, vl);
+            lastJ = j;
+
+            if (tokens[j].type == TokenType.Eof || tokens[j].type == TokenType.Line || tokens[j].value == "}") {
+                //遇到两个换行当成结束处理
+                break;
+            }
+        }
+
+        if (lineCount > 1) {
+            j = lastJ;
+            let table = [];
+            let kw = 0;
+            let vw = 0;
+            for (let i = 0, n = formatstate.cur; i < list.length; i += 2) {
+                let key = format_token(tokens.slice(n, n + list[i]));
+                n += list[i] + 1;
+                let val = format_token(tokens.slice(n, n + list[i + 1] + 1));
+                kw = Math.max(kw, key.length);
+                vw = Math.max(vw, val.length);
+                n += list[i + 1] + 1;
+                let line = [key, val];
+                table.push(line);
+            }
+            let formatcode = "";
+            for (let i = 0; i < table.length; i++) {
+                formatcode += `${i > 0 ? prespace : ""}${table[i][0]}${" ".repeat(kw - table[i][0].length)} = ${table[i][1]}`;
+            }
+
+            formatstate.row += list.length / 2;
+            formatstate.formatcode += formatcode;
+            formatstate.line_start_pos = formatstate.formatcode.length;
+            formatstate.cur = j;
+        }
+
+        return 0;
+    }
+
+    function format_token(tokens: IToken[], formatstate?: FormatState) {
         let tabs = [];
         let tab = 0;
         let statcks = [];
         let curlineTab = 0;
-        let isspace = (i: number) => ["\r\n", "\n", "\t", " "].indexOf(formatcode.at(-1)) >= 0;
-        function try_add_space(i: number = -1) { formatcode += isspace(i) ? "" : " "; }
-        let row = 0, line_start_pos = 0;
+        let fs: FormatState = formatstate || { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens };
+        function try_add_space() { fs.formatcode += (["\r\n", "\n", "\t", " "].indexOf(fs.formatcode.at(-1)) >= 0) ? "" : " "; }
 
-        let j = 0;
-        while (j < tokens.length) {
-            let tk: string = tokens[j].value;
-            let tt = tokens[j].type;
+        while (fs.cur < tokens.length) {
+            let tk: string = tokens[fs.cur].value;
+            let tt = tokens[fs.cur].type;
             let ntk: string;
             let ntt: TokenType;
-            if (j + 1 < tokens.length) {
-                ntk = tokens[j + 1].value; //next
-                ntt = tokens[j + 1].type;
+            if (fs.cur + 1 < tokens.length) {
+                ntk = tokens[fs.cur + 1].value; //next
+                ntt = tokens[fs.cur + 1].type;
             }
 
             if (tt == TokenType.Error) {
-                console.log(`Uncaught SyntaxError: Invalid or unexpected token "${tk}" ${row + 1}:${formatcode.length - line_start_pos}`)
+                let error: FormatError = fs.error = fs.error || {} as any;
+                error.col = fs.formatcode.length - fs.line_start_pos;
+                error.row = fs.row + 1;
+                error.token = tokens[fs.cur];
+                error.msg = `Uncaught SyntaxError: Invalid or unexpected token "${tk}" ${error.row}:${error.col}`;
                 break;
             } else if (tt == TokenType.Eof) {
                 break;
             } else if (tt == TokenType.Note) {
-                try_add_space(-1)
+                try_add_space()
             } else if (prespace.indexOf(tk) >= 0) {
-                try_add_space(-1)
+                try_add_space()
             }
-            formatcode += tk;
+            fs.formatcode += tk;
 
             if (open.indexOf(tk) >= 0) {
                 curlineTab++;
@@ -291,6 +366,7 @@ namespace lua_format {
                 curlineTab--;
                 statcks.pop();
             }
+            let headspace = "";
             if (tt == TokenType.Line) {
                 if (curlineTab > 0) {
                     tabs.push(curlineTab);
@@ -301,39 +377,37 @@ namespace lua_format {
                     }
                 }
 
-                line_start_pos = formatcode.length;
-                row++;
+                fs.line_start_pos = fs.formatcode.length;
+                fs.row++;
                 tab += curlineTab ? (curlineTab / Math.abs(curlineTab)) : 0;
                 curlineTab = 0;
                 let isClose = ["elseif", "else", "then"].indexOf(ntk) >= 0 || close.indexOf(ntk) >= 0;
                 if (!(ntt == TokenType.Line)) { //下一行有内容的时候才添加tab
-                    formatcode += (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
+                    fs.formatcode += headspace = (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
                 }
             } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
                 if (!(!ntk || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
-                    try_add_space(-1)
+                    try_add_space()
                 }
             } else if (sufspace.indexOf(tk) >= 0) {
-                try_add_space(-1)
+                try_add_space()
             } else {
                 if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt) >= 0) { //这里错误了
-                    try_add_space(-1)
+                    try_add_space()
                 }
             }
 
-            if (tt == TokenType.Symbol && tk == "{") {
-                let ti = tokens[j];
-                if (ti.flags == "---@align") {
-                    // align(tab + 1);
-                }
+            let needAlign = tt == TokenType.Line && tokens[fs.cur].flags == "---@align";
+            fs.cur++;
+            if (needAlign) {
+                align(headspace, fs);
             }
-            j++;
         }
 
-        return formatcode;
+        return fs.formatcode;
     }
 
-    export function format(code: string, options?: { space?: number }) {
+    export function format(code: string, options?: { space?: number }, error?: FormatError | any) {
         if (!options) {
             options = {}
             if (!options.space) options.space = 4;
@@ -345,119 +419,32 @@ namespace lua_format {
         let suftext: string = "";
         let limit = code.length;
 
-        while (!tker.eof()) {
+        do {
             let it = tker.take();
-            if (it.type == TokenType.Space) continue;
+            tokens.push(it); // console.log(it)
 
-            tokens.push(it);
-            // console.log(it)
-
-            if (it.type == TokenType.Line || limit == code.length) { //首行或者每一新行 
-                // it = tker.take();
-                // if (it.value == "local" ){
-
-                // }
-            }
-
-            if (it.type == TokenType.Error) {
+            if (it.type == TokenType.Eof) {
+                break;
+            } else if (it.type == TokenType.Error) {
+                /*
                 console.log("---------------------------------- Error ----------------------------------")
                 console.log(it);
+                */
                 suftext = code.substring(tker._offset, code.length);
                 break;
             }
+        } while (--limit > 0);  // 防止解析逻辑死循环 正常来说不会发生
 
-            if (--limit <= 0)  // 防止解析逻辑死循环 正常来说不会发生
-                break;
-        }
-
-        let formatcode = "";
-
-        function align(tab: number) {
-            let prespace = (" ".repeat(4)).repeat(Math.max(0, tab));
-            formatcode += tks.pop();  // \n
-
-            let isOk = false;
-            let j = tks.length - 1;
-            let list = [];
-            for (; j >= 0; j--) {
-                if (tks[j] == "[") {
-                    j--;
-                    if (tkt[j] == TokenType.ID) j--; else break;
-                    if (tks[j] == "]") j--; else break;
-                    list.push(3);
-                } else if (tkt[j] == TokenType.ID) {
-                    j--;
-                    list.push(1);
-                } else break;
-                if (tks[j] == "=") j--; else break;
-
-                let i = 0;
-                while (tkt[j] != TokenType.Line) {
-                    i++;
-                    j--;
-                }
-                list.push(i);
-
-                if (tkt[j] == TokenType.Eof || (tkt[j - 1] == TokenType.Line || tks[j - 1] == "}" || tkt[j - 1] == TokenType.Eof)) {
-                    isOk = true;
-                    //遇到两个换行当成结束处理
-                    break;
-                }
-            }
-
-            if (isOk) {
-                let l1 = tks.slice(j, tks.length);
-                let l2 = tkt.slice(j, tks.length);
-
-                let end = tokens.length - tks.length;
-                let tmp = tokens.slice(end, end + (tks.length - j) - 1);
-                for (let i = 0; i < list.length; i += 2) {
-                }
-
-                // console.log(aaa(tmp))
-                // console.log(l1, l2);
-                // console.log(tmp)
-            }
-
-
-            // let arr = [];
-            // while (tks.length > 0) {
-            //     if (tkt.at(tks.length - 1) != TokenType.ID) {
-            //         break;
-            //     }
-            //     arr.push(tks.pop())
-            //     arr.push(tks.pop())
-            //     arr.push(tks.pop())
-            //     if (tkt[tks.length - 1] != TokenType.Symbol) {
-            //         break;
-            //     }
-            //     arr.push(tks.pop());
-            //     if (tkt[tks.length - 1] == TokenType.Note) {
-            //         arr.push(tks.pop())
-            //     } else {
-            //         arr.push("");
-            //     }
-            //     if (tks.at(-1) == "\n" || tks.at(-1) == "\r\n") tks.pop();
-            //     if (tks.at(-1) == "}") break;
-            // }
-            // let kw = 0, vw = 0;
-            // for (let i = 0; i < arr.length; i += 5) {
-            //     kw = Math.max(arr[i].length, kw);
-            //     vw = Math.max(arr[i + 2].length, vw);
-            // }
-            // for (let i = 0; i < arr.length; i += 5) {
-            //     formatcode += `${prespace}${arr[i]}${" ".repeat(kw - arr[i].length + 1)}${arr[i + 1]} ${arr[i + 2]}${" ".repeat(vw - arr[i + 2].length)}${arr[i + 3]} ${arr[i + 4]}\n`;
-            // }
-            // console.log(kw, vw);
-            // console.log(arr);
-        }
-
-        return format_token(tokens) + suftext;
+        let fs: FormatState = { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens, error: error };
+        return format_token(tokens, fs) + suftext;
     }
 }
 
 let clock = Date.now();
-let newcode = lua_format.format(lua_code);
+
+let error = {}
+let newcode = lua_format.format(lua_code, null, error);
+console.log(error);
 console.log(Date.now() - clock, "ms");
 
 fs.writeFileSync("1.lua", newcode);
