@@ -1,4 +1,4 @@
-namespace lua_format {
+namespace lua_sytles {
     type IToken = { value: string, type: TokenType, offset?: number, flags?: string, block?: number };
     enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Bof, Line };
 
@@ -412,7 +412,7 @@ namespace lua_format {
         return fs.formatcode;
     }
 
-    export function format(code: string, options?: { space?: number }, error?: FormatError | any) {
+    export function styles(code: string, options?: { space?: number }, error?: FormatError | any) {
         if (!options) {
             options = {}
             if (!options.space) options.space = 4;
@@ -445,4 +445,4 @@ namespace lua_format {
     }
 }
 
-export default lua_format;
+export default lua_sytles;

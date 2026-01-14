@@ -8,7 +8,7 @@ let lua_code = fs
 
 let clock = Date.now();
 let error = {}
-let newcode = lua_format.format(lua_code, { space: 4 }, error);
+let newcode = lua_format.styles(lua_code, { space: 4 }, error);
 console.log(error);
 console.log(Date.now() - clock, "ms");
 
