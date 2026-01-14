@@ -7,9 +7,6 @@
     "build": "tsc",
     "test": "node test/index.js"
   },
-  "files": [
-    "index.js"
-  ],
   "author": "fox",
   "license": "MIT",
   "description": "Only beautify your code (indentation, spacing, alignment), your code lines will not be increased or decreased.",
