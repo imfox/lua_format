@@ -6,7 +6,7 @@ let lua_code = fs
 
 namespace lua_format {
     type IToken = { value: string, type: TokenType, offset?: number, flags?: string, block?: number };
-    enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Line };
+    enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Bof, Line };
 
     class Tokenize {
         _raw: string;
@@ -14,6 +14,7 @@ namespace lua_format {
         protected _size: number;
         protected _offsetStacks: number[];
         protected _block: number;
+        protected _bof: boolean;
 
         constructor(raw: any) {
             this._block = 0;
@@ -33,7 +34,6 @@ namespace lua_format {
             this._offset += size;
             return this._raw.slice(this._offset - size, this._offset);
         }
-
 
         is(t: string, offset: number = 0) {
             for (let i = 0; i < t.length; i++)
@@ -205,7 +205,11 @@ namespace lua_format {
             let ti: IToken = { value: "", type: TokenType.Symbol, };
             if (this.is_space_h()) this.read_space();
 
-            if (this.eof()) {
+            if (!this._bof) {
+                this._bof = true;
+                ti.type = TokenType.Bof;
+                this.align_test(ti);
+            } else if (this.eof()) {
                 ti.type = TokenType.Eof;
             } else if (this.is_note_h()) {
                 this.read_note(ti);
@@ -397,7 +401,7 @@ namespace lua_format {
                 }
             }
 
-            let needAlign = tt == TokenType.Line && tokens[fs.cur].flags == "---@align";
+            let needAlign = (tt == TokenType.Line || tt == TokenType.Bof) && tokens[fs.cur].flags == "---@align";
             fs.cur++;
             if (needAlign) {
                 align(headspace, fs);
