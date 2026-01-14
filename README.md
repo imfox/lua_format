@@ -1,7 +1,39 @@
 # lua_format
 
 ```lua
-{1,2,3,4,5}
+local a  =2;
+local abbs  =2;
+local txxx = {
+local x={   
+     abc    =1, -- hello world
+    ["hello"]=2,
+    b=2,c=3,   
+     a=2,
+     xx={}
+     a=function () end; --[[ he
+     llo --]]
+     local x=1,
+
+     a  =2;
+     bb=3
+ccc=3,
+
+     a=2,
+     bb=2,
+     ccc=3
+            }}
+
+            local a  =1
+            abc  =1
+ longolojojo=function() end;
+ azz=1
+
+             local a =1
+            abc =1
+ longolojojo=function() end;
+ azz=1
+
+ {1,2,3,4,5}
 local a,b, ej={{1,2},{2,{3,4,{2}}}},(1),2,1
 function a : b()
     end
@@ -105,6 +137,38 @@ end
 ```
 to 
 ```lua
+local a    = 2; 
+local abbs = 2; 
+local txxx = {
+    local x = {
+        abc       = 1, -- hello world
+        ["hello"] = 2, 
+        b         = 2, c = 3, 
+        a         = 2, 
+        xx        = {}
+        a         = function() end; --[[ he
+     llo --]]
+        local x   = 1, 
+
+        a   = 2; 
+        bb  = 3
+        ccc = 3, 
+
+        a = 2, 
+        bb = 2, 
+        ccc = 3
+    }}
+
+local a     = 1
+abc         = 1
+longolojojo = function() end; 
+azz         = 1
+
+local a = 1
+abc = 1
+longolojojo = function() end; 
+azz = 1
+
 {1, 2, 3, 4, 5}
 local a, b, ej = {{1, 2}, {2, {3, 4, {2}}}}, (1), 2, 1
 function a:b()
@@ -114,7 +178,7 @@ while x > 100 do print(x) end
 
 if a and b or c then 
     function a() return 
-        function () end end
+        function() end end
 end
 
 local tab = {1, 
@@ -139,8 +203,8 @@ function a()
     do print(1) end do 
         print("abcdefg")
     end
-    return function 
-        
+    return function
+
         (a, b
             , c, 
             d, 
@@ -159,8 +223,8 @@ local hero = {
     hp = 100, 
 }
 
-local a = (function () end)() + 1 / 2 * 3 >> 1 << 3; 
-error code test-- note
+local a = (function() end)() + 1 / 2 * 3 >> 1 << 3; 
+error code test -- note
 
 {1, 1, }[1](1)
 (hello)[1]
@@ -185,9 +249,9 @@ fun add(a, b){
     ; } print ":"
 print({1, a().b().c()[1], 2} + {} .. {} + 0x1)
 ::continue::
-print(function ()
-    print(function ()
-        print(function ()
+print(function()
+    print(function()
+        print(function()
             print(12) end) end) end)
 {
     (
@@ -198,7 +262,7 @@ print(function ()
 }
 
 goto continue 1
-local x = function (
+local x = function(
     a, 
     b, 
     c, 
