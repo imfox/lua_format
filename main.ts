@@ -5,7 +5,7 @@ let lua_code = fs
     .toString();
 
 type IToken = { value: string, type: TokenType, offset?: number, flags?: string, block?: number };
-enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Line };
+enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Line, Space };
 
 class Tokenize {
     _raw: string;
@@ -137,7 +137,7 @@ class Tokenize {
             char = this.shift();
             ti && (ti.value += char);
         }
-        ti && (ti.type = TokenType.ID);
+        ti && (ti.type = TokenType.Space);
         return true;
     }
 
@@ -173,6 +173,7 @@ class Tokenize {
         }
         if (!this.num_end() && !this.is(".."))
             return this.throw_error(ti, this.restore());
+        this._offsetStacks.pop();
         return true;
     };
 
@@ -184,9 +185,9 @@ class Tokenize {
 
     take(): IToken {
         let ti: IToken = { value: "", type: TokenType.Symbol, };
-        if (this.is_space_h()) this.read_space();
-
-        if (this.eof()) {
+        if (this.is_space_h()) {
+            this.read_space(ti);
+        } else if (this.eof()) {
             ti.type = TokenType.Eof;
         } else if (this.is_note_h()) {
             this.read_note(ti);
@@ -197,7 +198,7 @@ class Tokenize {
         } else if (this.is_line_h()) {
             if (this.is("\r\n")) {
                 ti.value = this.shift(2);
-            } else if (this.is("\n")) {
+            } else /** if (this.is("\n")) */ {
                 ti.value = this.shift(1);
             }
             ti.type = TokenType.Line;
@@ -241,6 +242,93 @@ class Tokenize {
     }
 }
 
+let prespace = ['%', '&', '*', '+', '-', '..', '/', '//', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|', '~='];
+let sufspace = ['%', '&', '*', '+', ',', '-', '..', '/', '//', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|', '~='];
+
+let open = ['(', '[', 'do', 'function', 'if', 'repeat', '{'];
+let close = [')', ']', 'end', 'until', '}'];
+
+function aaa(tokens: IToken[]) {
+    let formatcode = "";
+    let tabs = [];
+    let tab = 0;
+    let statcks = [];
+    let curlineTab = 0;
+    let isspace = (i: number) => ["\r\n", "\n", "\t", " "].indexOf(formatcode.at(-1)) >= 0;
+    function try_add_space(i: number = -1) { formatcode += isspace(i) ? "" : " "; }
+    let tks = tokens.map(d => d.value).reverse();
+    let tkt = tokens.map(d => d.type).reverse();
+    let row = 0, line_start_pos = 0;
+    while (tks.length) {
+        let tk: string = tks.pop();
+        let tt = tkt[tks.length];
+        let ntk: string;
+        let ntt: TokenType;
+        if (tks.length) {
+            ntk = tks.at(-1); //next
+            ntt = tkt.at(tks.length - 1);
+        }
+
+        if (tt == TokenType.Error) {
+            console.log(`Uncaught SyntaxError: Invalid or unexpected token "${tk}" ${row + 1}:${formatcode.length - line_start_pos}`)
+            break;
+        } else if (tt == TokenType.Eof) {
+            break;
+        } else if (tt == TokenType.Note) {
+            try_add_space(-1)
+        } else if (prespace.indexOf(tk) >= 0) {
+            try_add_space(-1)
+        }
+        formatcode += tk;
+
+        if (open.indexOf(tk) >= 0) {
+            curlineTab++;
+            statcks.push(tk);
+        } else if (close.indexOf(tk) >= 0) {
+            curlineTab--;
+            statcks.pop();
+        }
+        if (tt == TokenType.Line) {
+            if (curlineTab > 0) {
+                tabs.push(curlineTab);
+            } else if (curlineTab < 0) {
+                let dec = curlineTab;
+                while ((dec += tabs.pop()) < 0) {
+                    tab--;
+                }
+            }
+
+            line_start_pos = formatcode.length;
+            row++;
+            tab += curlineTab ? (curlineTab / Math.abs(curlineTab)) : 0;
+            curlineTab = 0;
+            let isClose = ["elseif", "else", "then"].indexOf(ntk) >= 0 || close.indexOf(ntk) >= 0;
+            if (!(ntt == TokenType.Line)) { //下一行有内容的时候才添加tab
+                formatcode += (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
+            }
+        } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
+            if (!(!ntk || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
+                try_add_space(-1)
+            }
+        } else if (sufspace.indexOf(tk) >= 0) {
+            try_add_space(-1)
+        } else {
+            if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt) >= 0) { //这里错误了
+                try_add_space(-1)
+            }
+        }
+
+        if (tt == TokenType.Symbol && tk == "{") {
+            let ti = tokens[tokens.length - tks.length - 1];
+            if (ti.flags == "---@align") {
+                // align(tab + 1);
+            }
+        }
+    }
+
+    return formatcode;
+}
+
 function format(code: string, options?: { space?: number }) {
     if (!options) {
         options = {}
@@ -252,9 +340,24 @@ function format(code: string, options?: { space?: number }) {
     let tokens: IToken[] = [];
     let suftext: string = "";
     let limit = code.length;
+
+    let alignBegin = 0;
+    let alignBlocks = [];
     while (!tker.eof()) {
         let it = tker.take();
+        if (it.type == TokenType.Space) continue;
+
         tokens.push(it);
+        // console.log(it)
+
+        if (it.type == TokenType.Line || limit == code.length) { //首行或者每一新行 
+            // it = tker.take();
+            // if (it.value == "local" ){
+
+            // }
+
+        }
+
         if (it.type == TokenType.Error) {
             console.log("---------------------------------- Error ----------------------------------")
             console.log(it);
@@ -272,12 +375,6 @@ function format(code: string, options?: { space?: number }) {
     let tks = tokens.map(d => d.value).reverse();
     let tkt = tokens.map(d => d.type).reverse();
 
-    let prespace = ['%', '&', '*', '+', '-', '..', '/', '//', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|', '~='];
-    let sufspace = ['%', '&', '*', '+', ',', '-', '..', '/', '//', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|', '~='];
-
-    let open = ['(', '[', 'do', 'function', 'if', 'repeat', '{'];
-    let close = [')', ']', 'end', 'until', '}'];
-
     let isspace = (i: number) => ["\r\n", "\n", "\t", " "].indexOf(formatcode.at(-1)) >= 0;
     function try_add_space(i: number = -1) { formatcode += isspace(i) ? "" : " "; }
 
@@ -289,36 +386,80 @@ function format(code: string, options?: { space?: number }) {
         let prespace = (" ".repeat(4)).repeat(Math.max(0, tab));
         formatcode += tks.pop();  // \n
 
-        let arr = [];
-        while (tks.length > 0) {
-            if (tkt.at(tks.length - 1) != TokenType.ID) {
+        let isOk = false;
+        let j = tks.length - 1;
+        let list = [];
+        for (; j >= 0; j--) {
+            if (tks[j] == "[") {
+                j--;
+                if (tkt[j] == TokenType.ID) j--; else break;
+                if (tks[j] == "]") j--; else break;
+                list.push(3);
+            } else if (tkt[j] == TokenType.ID) {
+                j--;
+                list.push(1);
+            } else break;
+            if (tks[j] == "=") j--; else break;
+
+            let i = 0;
+            while (tkt[j] != TokenType.Line) {
+                i++;
+                j--;
+            }
+            list.push(i);
+
+            if (tkt[j] == TokenType.Eof || (tkt[j - 1] == TokenType.Line || tks[j - 1] == "}" || tkt[j - 1] == TokenType.Eof)) {
+                isOk = true;
+                //遇到两个换行当成结束处理
                 break;
             }
-            arr.push(tks.pop())
-            arr.push(tks.pop())
-            arr.push(tks.pop())
-            if (tkt[tks.length - 1] != TokenType.Symbol) {
-                break;
+        }
+
+        if (isOk) {
+            let l1 = tks.slice(j, tks.length);
+            let l2 = tkt.slice(j, tks.length);
+
+            let end = tokens.length - tks.length;
+            let tmp = tokens.slice(end, end + (tks.length - j) - 1);
+            for (let i = 0; i < list.length; i += 2) {
             }
-            arr.push(tks.pop());
-            if (tkt[tks.length - 1] == TokenType.Note) {
-                arr.push(tks.pop())
-            } else {
-                arr.push("");
-            }
-            if (tks.at(-1) == "\n" || tks.at(-1) == "\r\n") tks.pop();
-            if (tks.at(-1) == "}") break;
+
+            // console.log(aaa(tmp))
+            // console.log(l1, l2);
+            // console.log(tmp)
         }
-        let kw = 0, vw = 0;
-        for (let i = 0; i < arr.length; i += 5) {
-            kw = Math.max(arr[i].length, kw);
-            vw = Math.max(arr[i + 2].length, vw);
-        }
-        for (let i = 0; i < arr.length; i += 5) {
-            formatcode += `${prespace}${arr[i]}${" ".repeat(kw - arr[i].length + 1)}${arr[i + 1]} ${arr[i + 2]}${" ".repeat(vw - arr[i + 2].length)}${arr[i + 3]} ${arr[i + 4]}\n`;
-        }
-        console.log(kw, vw);
-        console.log(arr);
+
+
+        // let arr = [];
+        // while (tks.length > 0) {
+        //     if (tkt.at(tks.length - 1) != TokenType.ID) {
+        //         break;
+        //     }
+        //     arr.push(tks.pop())
+        //     arr.push(tks.pop())
+        //     arr.push(tks.pop())
+        //     if (tkt[tks.length - 1] != TokenType.Symbol) {
+        //         break;
+        //     }
+        //     arr.push(tks.pop());
+        //     if (tkt[tks.length - 1] == TokenType.Note) {
+        //         arr.push(tks.pop())
+        //     } else {
+        //         arr.push("");
+        //     }
+        //     if (tks.at(-1) == "\n" || tks.at(-1) == "\r\n") tks.pop();
+        //     if (tks.at(-1) == "}") break;
+        // }
+        // let kw = 0, vw = 0;
+        // for (let i = 0; i < arr.length; i += 5) {
+        //     kw = Math.max(arr[i].length, kw);
+        //     vw = Math.max(arr[i + 2].length, vw);
+        // }
+        // for (let i = 0; i < arr.length; i += 5) {
+        //     formatcode += `${prespace}${arr[i]}${" ".repeat(kw - arr[i].length + 1)}${arr[i + 1]} ${arr[i + 2]}${" ".repeat(vw - arr[i + 2].length)}${arr[i + 3]} ${arr[i + 4]}\n`;
+        // }
+        // console.log(kw, vw);
+        // console.log(arr);
     }
 
     let row = 0, line_start_pos = 0;
