@@ -1,17 +1,32 @@
 {
-  "name": "luaformat",
+  "name": "lua_format",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "test": "node test/index.js"
   },
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "files": [
+    "index.js"
+  ],
+  "author": "fox",
+  "license": "MIT",
+  "description": "Only beautify your code (indentation, spacing, alignment), your code lines will not be increased or decreased.",
   "devDependencies": {
     "@types/node": "^25.0.6",
     "typescript": "^5.9.3"
   },
-  "dependencies": {
-  }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imfox/lua_format.git"
+  },
+  "keywords": [
+    "lua",
+    "format"
+  ],
+  "bugs": {
+    "url": "https://github.com/imfox/lua_format/issues"
+  },
+  "homepage": "https://github.com/imfox/lua_format#readme"
 }

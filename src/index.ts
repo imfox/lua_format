@@ -1,12 +1,12 @@
-import * as fs from "fs";
-
-let lua_code = fs
-    .readFileSync("test.lua")
-    .toString();
-
 namespace lua_format {
     type IToken = { value: string, type: TokenType, offset?: number, flags?: string, block?: number };
     enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Bof, Line };
+
+    function charAt(str: string, i: number): string | undefined {
+        let idx = i < 0 ? str.length + i : i;
+        if (idx >= 0 && idx < str.length)
+            return str.charAt(idx);
+    }
 
     class Tokenize {
         _raw: string;
@@ -22,13 +22,14 @@ namespace lua_format {
             this._raw = raw as any;
             this._offset = 0;
             this._size = raw.length;
+            this._bof = false;
         }
 
         public save() { this._offsetStacks.push(this._offset); }
-        public restore() { return this._offset = this._offsetStacks.pop(); }
+        public restore() { return this._offset = this._offsetStacks.length ? this._offsetStacks.pop()! : this._offset; }
 
         eof(offset: number = 0) { return (this._offset + offset) >= this._size; }
-        at(index: number = 0) { return this._raw.at(this._offset + index); }
+        at(index: number = 0) { return charAt(this._raw, this._offset + index)!; }
 
         shift(size: number = 1) {
             this._offset += size;
@@ -37,7 +38,7 @@ namespace lua_format {
 
         is(t: string, offset: number = 0) {
             for (let i = 0; i < t.length; i++)
-                if (t.at(i) != this.at(offset + i))
+                if (t.charAt(i) != this.at(offset + i))
                     return false;
             return true;
             // return this._raw.substring(this._offset, this._offset + t.length) == t;
@@ -104,7 +105,7 @@ namespace lua_format {
 
         read_str(ti: IToken) {
             ti.type = TokenType.String;
-            let eof_: boolean;
+            let eof_: boolean = false;
             let closed = this.is("[[") ? "]]" : this.at();
             let ec = closed.length > 1 ? this.eof.bind(this) : this.line_or_eof.bind(this);
             ti.value += this.shift();
@@ -262,7 +263,7 @@ namespace lua_format {
         for (; j < tokens.length;) {
             let kl = 0;
             let sk = tokens[j].value == "[";
-            let block = tokens[j].block - (sk ? 1 : 0);
+            let block = tokens[j].block! - (sk ? 1 : 0);
             if (sk) {
                 j++;
                 if ([TokenType.ID, TokenType.String, TokenType.Number].indexOf(tokens[j].type) >= 0) j++; else break;
@@ -335,7 +336,7 @@ namespace lua_format {
         let statcks = [];
         let curlineTab = 0;
         let fs: FormatState = formatstate || { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens };
-        function try_add_space() { fs.formatcode += (["\r\n", "\n", "\t", " "].indexOf(fs.formatcode.at(-1)) >= 0) ? "" : " "; }
+        function try_add_space() { fs.formatcode += (["\r\n", "\n", "\t", " "].indexOf(charAt(fs.formatcode, -1)!) >= 0) ? "" : " "; }
 
         while (fs.cur < tokens.length) {
             let tk: string = tokens[fs.cur].value;
@@ -376,7 +377,7 @@ namespace lua_format {
                     tabs.push(curlineTab);
                 } else if (curlineTab < 0) {
                     let dec = curlineTab;
-                    while ((dec += tabs.pop()) < 0) {
+                    while ((dec += tabs.length ? tabs.pop()! : 0) < 0) {
                         tab--;
                     }
                 }
@@ -385,18 +386,18 @@ namespace lua_format {
                 fs.row++;
                 tab += curlineTab ? (curlineTab / Math.abs(curlineTab)) : 0;
                 curlineTab = 0;
-                let isClose = ["elseif", "else", "then"].indexOf(ntk) >= 0 || close.indexOf(ntk) >= 0;
-                if (!(ntt == TokenType.Line)) { //下一行有内容的时候才添加tab
+                let isClose = ["elseif", "else", "then"].indexOf(ntk!) >= 0 || close.indexOf(ntk!) >= 0;
+                if (!(ntt! == TokenType.Line)) { //下一行有内容的时候才添加tab
                     fs.formatcode += headspace = (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
                 }
             } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
-                if (!(!ntk || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
+                if (!(!ntk! || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
                     try_add_space()
                 }
             } else if (sufspace.indexOf(tk) >= 0) {
                 try_add_space()
             } else {
-                if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt) >= 0) { //这里错误了
+                if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt!) >= 0) { //这里错误了
                     try_add_space()
                 }
             }
@@ -444,13 +445,4 @@ namespace lua_format {
     }
 }
 
-let clock = Date.now();
-
-let error = {}
-let newcode = lua_format.format(lua_code, null, error);
-console.log(error);
-console.log(Date.now() - clock, "ms");
-
-fs.writeFileSync("1.lua", newcode);
-// console.log(newcode);
-
+export default lua_format;
