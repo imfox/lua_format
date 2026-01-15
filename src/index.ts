@@ -185,7 +185,7 @@ namespace lua_sytles {
             ti.type = TokenType.Error;
             ti.offset = index;
             ti.value = "";
-            while (!this.line_or_eof() && !this.is("--"))  //只能被注释与换行打断
+            while (!this.line_or_eof() && !this.is("--") && !this.is("[["))  //只能被注释与文本块与换行打断
                 ti.value += this.shift();
             return false;
         }
