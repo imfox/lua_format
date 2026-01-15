@@ -1,8 +1,9 @@
 namespace lua_sytles {
     type IToken = { value: string, type: TokenType, offset?: number, flags?: string, block?: number };
     enum TokenType { Error, ID, String, Number, Symbol, Note, Eof, Bof, Line };
+    type Options = { space?: number };
 
-    function charAt(str: string, i: number): string | undefined {
+    function charAt(str: string, i: number): string | undefined { // 支持负数索引
         let idx = i < 0 ? str.length + i : i;
         if (idx >= 0 && idx < str.length)
             return str.charAt(idx);
@@ -27,6 +28,7 @@ namespace lua_sytles {
 
         public save() { this._offsetStacks.push(this._offset); }
         public restore() { return this._offset = this._offsetStacks.length ? this._offsetStacks.pop()! : this._offset; }
+        public pop() { this._offsetStacks.pop(); }
 
         eof(offset: number = 0) { return (this._offset + offset) >= this._size; }
         at(index: number = 0) { return charAt(this._raw, this._offset + index)!; }
@@ -175,26 +177,28 @@ namespace lua_sytles {
             }
             if (!this.num_end() && !this.is(".."))
                 return this.throw_error(ti, this.restore());
-            this._offsetStacks.pop();
+            this.pop();
             return true;
         };
 
         private throw_error(ti: IToken, index: number) {
             ti.type = TokenType.Error;
             ti.offset = index;
+            ti.value = "";
+            while (!this.line_or_eof() && !this.is("--"))  //只能被注释与换行打断
+                ti.value += this.shift();
             return false;
         }
 
         private align_test(ti: IToken) {
             this.save(); //这里会试着寻找满足自动对齐的条件
             do { // 这里其实可以加一个判定 如果已经在对齐的过程中 那么不需要再次做判断
-                let dk: IToken = { value: "", type: TokenType.Error };
-                if (!this.try_read_key(dk)) break;
-                if ((dk.value == "local" || dk.value == "global") && !this.try_read_key(dk)) break;
-
-                let sp: IToken = { value: "", type: TokenType.Error };
-                this.read_space(sp);
-                if (sp.value.length < 2) break;
+                let tmp: IToken = { value: "", type: TokenType.Error };
+                if (!this.try_read_key(tmp)) break;
+                if ((tmp.value == "local" || tmp.value == "global") && !this.try_read_key(tmp)) break;
+                tmp.value = "";
+                this.read_space(tmp);
+                if (tmp.value.length < 2) break;
                 if (!this.is_symbol_h() || !this.is("=")) break;
 
                 ti.flags = "---@align";
@@ -251,8 +255,8 @@ namespace lua_sytles {
     let open = ['(', '[', 'do', 'function', 'if', 'repeat', '{'];
     let close = [')', ']', 'end', 'until', '}'];
 
-    type FormatError = { row: number, col: number, token: IToken, msg: string };
-    type FormatState = { formatcode: string, cur: number, row: number, line_start_pos: number, tokens: IToken[], error?: FormatError };
+    export type FormatError = { row: number, col: number, token: IToken, msg: string };
+    type FormatState = { formatcode: string, cur: number, row: number, line_start_pos: number, tokens: IToken[], options: Options, error?: FormatError[] };
 
     function align(prespace: string, formatstate: FormatState): number {
         let tokens = formatstate.tokens;
@@ -335,26 +339,27 @@ namespace lua_sytles {
         let tab = 0;
         let statcks = [];
         let curlineTab = 0;
-        let fs: FormatState = formatstate || { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens };
+        let fs: FormatState = formatstate || { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens, options: { space: 4 } };
         function try_add_space() { fs.formatcode += (["\r\n", "\n", "\t", " "].indexOf(charAt(fs.formatcode, -1)!) >= 0) ? "" : " "; }
 
-        while (fs.cur < tokens.length) {
-            let tk: string = tokens[fs.cur].value;
-            let tt = tokens[fs.cur].type;
-            let ntk: string;
-            let ntt: TokenType;
-            if (fs.cur + 1 < tokens.length) {
-                ntk = tokens[fs.cur + 1].value; //next
+        let limit = tokens.length;
+        while (fs.cur < tokens.length && --limit >= 0) {
+            let { value: tk, type: tt } = tokens[fs.cur];
+            let ntk: string, ntt: TokenType;
+            if (fs.cur + 1 < tokens.length) { //next
+                ntk = tokens[fs.cur + 1].value;
                 ntt = tokens[fs.cur + 1].type;
             }
-
             if (tt == TokenType.Error) {
-                let error: FormatError = fs.error = fs.error || {} as any;
-                error.col = fs.formatcode.length - fs.line_start_pos;
-                error.row = fs.row + 1;
-                error.token = tokens[fs.cur];
-                error.msg = `Uncaught SyntaxError: Invalid or unexpected token "${tk}" ${error.row}:${error.col}`;
-                break;
+                try_add_space()
+                let row = fs.row + 1, col = fs.formatcode.length - fs.line_start_pos;
+                let error: FormatError = {
+                    col: col,
+                    row: row,
+                    token: tokens[fs.cur],
+                    msg: `Uncaught SyntaxError: Invalid or unexpected token "${tk}" ${row}:${col}`,
+                };
+                fs?.error?.push(error);
             } else if (tt == TokenType.Eof) {
                 break;
             } else if (tt == TokenType.Note) {
@@ -377,7 +382,7 @@ namespace lua_sytles {
                     tabs.push(curlineTab);
                 } else if (curlineTab < 0) {
                     let dec = curlineTab;
-                    while ((dec += tabs.length ? tabs.pop()! : 0) < 0) {
+                    while (tabs.length && (dec += tabs.pop()!) < 0) {
                         tab--;
                     }
                 }
@@ -388,7 +393,7 @@ namespace lua_sytles {
                 curlineTab = 0;
                 let isClose = ["elseif", "else", "then"].indexOf(ntk!) >= 0 || close.indexOf(ntk!) >= 0;
                 if (!(ntt! == TokenType.Line)) { //下一行有内容的时候才添加tab
-                    fs.formatcode += headspace = (" ".repeat(4)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
+                    fs.formatcode += headspace = (" ".repeat(fs.options.space!)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
                 }
             } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
                 if (!(!ntk! || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
@@ -412,37 +417,27 @@ namespace lua_sytles {
         return fs.formatcode;
     }
 
-    export function styles(code: string, options?: { space?: number }, error?: FormatError | any) {
-        if (!options) {
-            options = {}
-            if (!options.space) options.space = 4;
-        }
+    export function styles(code: string, options?: Options, out_errors?: FormatError[]) {
+        if (!code) return code;
+        code += "";
 
-        let tker = new Tokenize(code);
+        if (!options) options = {}
+        if (!options.space) options.space = 4;
 
+        let tk = new Tokenize(code);
         let tokens: IToken[] = [];
-        let suftext: string = "";
         let limit = code.length;
-
         do {
-            let it = tker.take();
+            let it = tk.take();
             tokens.push(it); // console.log(it)
-
             if (it.type == TokenType.Eof) {
-                break;
-            } else if (it.type == TokenType.Error) {
-                /*
-                console.log("---------------------------------- Error ----------------------------------")
-                console.log(it);
-                */
-                suftext = code.substring(tker._offset, code.length);
                 break;
             }
         } while (--limit > 0);  // 防止解析逻辑死循环 正常来说不会发生
 
-        let fs: FormatState = { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens, error: error };
-        return format_token(tokens, fs) + suftext;
+        let fs: FormatState = { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens, options: options, error: out_errors };
+        return tokens[tokens.length - 1].type == TokenType.Eof ? format_token(tokens, fs) : code; //没有被正常的解析结束
     }
 }
 
-export default lua_sytles;
+export = lua_sytles;

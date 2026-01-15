@@ -2,6 +2,7 @@
 Only beautify your code (indentation, spacing, alignment), your code lines will not be increased or decreased.
 
 仅给你的代码做美化处理（缩进，空格，对齐），你的代码行数不会被增加或者减少。
+出现错误时仅会跳过行继续处理
 
 ---
 ```lua
@@ -80,6 +81,8 @@ e,
 f) print(a,b,c,d,e);
     end
 end
+ 1aa
+dslkfjksdl 20aa
 
 local hero={ name="fox",power=10     ,hp=    100 .1   ,}
 local hero=   {    name="fox",
@@ -138,6 +141,7 @@ c,
 e
 )return{a,b,c,d,e,};
 end
+1qaaaaaa
 ```
 to 
 ```lua
@@ -216,6 +220,8 @@ function a()
             f) print(a, b, c, d, e); 
     end
 end
+1aa
+dslkfjksdl 20aa
 
 local hero = {name = "fox", power = 10, hp = 100 .1, }
 local hero = {name = "fox", 
@@ -274,4 +280,11 @@ local x = function(
     e
 ) return {a, b, c, d, e, }; 
 end
+1qaaaaaa
+```
+out error
+```
+Uncaught SyntaxError: Invalid or unexpected token "1aa" 75:0
+Uncaught SyntaxError: Invalid or unexpected token "20aa" 76:11
+Uncaught SyntaxError: Invalid or unexpected token "1qaaaaaa" 135:0
 ```

@@ -73,6 +73,8 @@ e,
 f) print(a,b,c,d,e);
     end
 end
+ 1aa
+dslkfjksdl 20aa
 
 local hero={ name="fox",power=10     ,hp=    100 .1   ,}
 local hero=   {    name="fox",
@@ -131,3 +133,4 @@ c,
 e
 )return{a,b,c,d,e,};
 end
+1qaaaaaa
