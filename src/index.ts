@@ -351,7 +351,7 @@ namespace lua_sytles {
         let statcks = [];
         let curlineTab = 0;
         let fs: FormatState = formatstate || { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens, options: { space: 4 } };
-        function try_add_space() { fs.formatcode += (["\r\n", "\n", "\t", " "].indexOf(charAt(fs.formatcode, -1)!) >= 0) ? "" : " "; }
+        function try_add_space() { fs.formatcode += (!fs.formatcode || ["\r\n", "\n", "\t", " "].indexOf(charAt(fs.formatcode, -1)!) >= 0) ? "" : " "; }
 
         let limit = tokens.length;
         while (fs.cur < tokens.length && --limit >= 0) {
