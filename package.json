@@ -1,10 +1,20 @@
 {
   "name": "lua_styles",
-  "version": "1.0.1",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "version": "1.1.1",
+  "main": "./dist/cjs/index.cjs",
+  "type": "module",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "require": "./dist/cjs/index.cjs",
+      "import": "./dist/esm/index.mjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:cjs && npm run build:esm",
+    "build:esm": "tsc -p tsconfig.esm.json && mv ./dist/esm/index.js ./dist/esm/index.mjs",
+    "build:cjs": "tsc -p tsconfig.cjs.json && mv ./dist/cjs/index.js ./dist/cjs/index.cjs",
     "test": "node test/index.js"
   },
   "author": "fox",

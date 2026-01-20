@@ -395,15 +395,20 @@ namespace lua_sytles {
                 if (!(ntt! == TokenType.Line)) { //下一行有内容的时候才添加tab
                     fs.formatcode += headspace = (" ".repeat(fs.options.space!)).repeat(Math.max(0, tab - (isClose ? 1 : 0)));
                 }
-            } else if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
-                if (!(!ntk! || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":" || ntk == "\r\n" || ntk == "\n")) {
-                    try_add_space()
-                }
-            } else if (sufspace.indexOf(tk) >= 0) {
-                try_add_space()
             } else {
-                if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt!) >= 0) { //这里错误了
-                    try_add_space()
+                let is_line_end = ntt! == TokenType.Line || ntt! == TokenType.Eof;
+                if (!is_line_end) {
+                    if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
+                        if (!(!ntk! || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":")) {
+                            try_add_space()
+                        }
+                    } else if (sufspace.indexOf(tk) >= 0) {
+                        try_add_space()
+                    } else {
+                        if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt!) >= 0) { //这里错误了
+                            try_add_space()
+                        }
+                    }
                 }
             }
 

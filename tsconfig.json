@@ -6,7 +6,7 @@
       "es5",
     ],
     "declaration": true,
-    "outDir": "dist",
+    "outDir": "test/dist",
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,

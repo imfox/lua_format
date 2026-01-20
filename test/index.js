@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const fs = require("fs");
-const lua_format = require("../dist/index");
+const lua_format = require("./dist/index.js");
 
 let lua_code = fs
     .readFileSync("test/test.lua")
