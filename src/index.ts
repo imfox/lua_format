@@ -55,13 +55,24 @@ namespace lua_sytles {
         num_16(offset: number = 0) { return this.some("0123456789abcdefABCDEF", offset); }
         num_end(offset: number = 0) { return this.eof(offset) || this.some(" \t\r\n+-*/&|><=~^%,;)}]", offset); }
         a2z(offset: number = 0) { let code = this.charCodeAt(offset); return code >= 97 && code <= 122 || code >= 65 && code <= 90 }
-
+        chinese(offset: number = 0) {
+            const cp = this.charCodeAt(offset);
+            return (
+                (cp >= 0x4E00 && cp <= 0x9FFF) ||   // 常用汉字
+                (cp >= 0x3400 && cp <= 0x4DBF) ||   // 扩展A
+                (cp >= 0x20000 && cp <= 0x2A6DF) || // 扩展B
+                (cp >= 0x2A700 && cp <= 0x2B73F) || // 扩展C
+                (cp >= 0x2B740 && cp <= 0x2B81F) || // 扩展D
+                (cp >= 0x2B820 && cp <= 0x2CEAF) || // 扩展E
+                (cp >= 0xF900 && cp <= 0xFAFF)      // 兼容汉字
+            );
+        }
         is_symbol_h(offset: number = 0) { return this.some("+-*/&|><^%=", offset); }
         is_space_h(offset: number = 0) { return this.some("\t ", offset); }
         is_note_h(offset: number = 0) { return this.is("--", offset); }                                   // --, --[[
         is_line_h(offset: number = 0) { return this.some("\r\n", offset); }
         is_str_h(offset: number = 0) { return this.some(`'"`, offset) || this.is("[[", offset); }
-        is_id_h(offset: number = 0) { return this.is("_", offset) || this.a2z(offset); }                  // _a, a
+        is_id_h(offset: number = 0) { return this.is("_", offset) || this.a2z(offset) || this.chinese(offset); }                  // _a, a
         is_num_h(offset: number = 0) {
             return (this.is("-", offset) && ((this.num_10(offset + 1) || this.at(offset + 1) == ".")))    // -.1, -1, -0x
                 || this.num_10(offset)                                                                    // 123, 0123
