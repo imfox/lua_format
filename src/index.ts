@@ -133,12 +133,19 @@ namespace lua_sytles {
         }
 
         read_note(ti: IToken) {
-            if (this.is("--[[")) { //块注释
+            if (this.is("--[[") || this.is("--[=")) { //块注释 --[[, --[==[
+                let block = 0;
+                for (let i = 0; i < 0xF; i++) {
+                    if (this.at(3 + i) != "=")
+                        break;
+                    block++;
+                }
+                let closeblock = `]${"=".repeat(block)}]`;
                 let close: boolean;
-                while (!(close = this.is("]]")) && !this.eof())
+                while (!(close = this.is(closeblock)) && !this.eof())
                     ti.value += this.shift();
                 if (close)
-                    ti.value += this.shift(2);
+                    ti.value += this.shift(closeblock.length);
             } else {
                 while (!this.line_or_eof())
                     ti.value += this.shift();
