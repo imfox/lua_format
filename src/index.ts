@@ -440,6 +440,71 @@ namespace lua_sytles {
         return fs.formatcode;
     }
 
+
+    function minify_token(tokens: IToken[]) {
+        const prespace = ['&', '-', '//', '<<', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|'];
+        const sufspace = ['&', '-', '//', '<<', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|'];
+        let fs: FormatState = { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens, options: { space: 4 } };
+        let textblocks: string[] = [];
+        function try_add_space() { if (!(!textblocks.length || ["\r\n", "\n", "\t", " ", ";"].indexOf(textblocks[textblocks.length - 1]) >= 0)) textblocks.push(" "); }
+
+        let limit = tokens.length;
+        while (fs.cur < tokens.length && --limit >= 0) {
+            let { value: tk, type: tt } = tokens[fs.cur];
+            let ntk: string, ntt: TokenType;
+            if (fs.cur + 1 < tokens.length) { //next
+                ntk = tokens[fs.cur + 1].value;
+                ntt = tokens[fs.cur + 1].type;
+            }
+
+            if (tt == TokenType.Eof) {
+                break;
+            } else if (tt == TokenType.Note) {
+                try_add_space()
+            } else if (prespace.indexOf(tk) >= 0) {
+                try_add_space()
+            }
+
+            if ([TokenType.Line, TokenType.Note].indexOf(tt) == -1) {
+                textblocks.push(tk);
+            }
+
+            let is_line_end = ntt! == TokenType.Line || ntt! == TokenType.Eof;
+            if (!is_line_end) {
+                if ([")", "}", "]", "end"].indexOf(tk) >= 0) {
+                    if (ntk! && [".", "(", ")", "{", "}", "[", "]", ",", ";", ":", "+", "-", "=", "*", "/"].indexOf(ntk!) == -1) {
+                        try_add_space();
+                    }
+                } else if (sufspace.indexOf(tk) >= 0) {
+                    try_add_space()
+                } else {
+                    if ([TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.Number, TokenType.ID].indexOf(ntt!) >= 0) { //这里错误了
+                        try_add_space()
+                    }
+                }
+            }
+            fs.cur++;
+        }
+        return textblocks.join("");
+    }
+
+    export function minify(code: string) {
+        if (!code) return code;
+        code += "";
+        let tk = new Tokenize(code);
+        let tokens: IToken[] = [];
+        let limit = code.length;
+        do {
+            let it = tk.take();
+            if ([TokenType.Line/** , TokenType.Note */].indexOf(it.type) == -1)
+                tokens.push(it); // console.log(it)
+            if (it.type == TokenType.Eof)
+                break;
+        } while (--limit > 0);  // 防止解析逻辑死循环 正常来说不会发生
+        let fs: FormatState = { formatcode: "", row: 0, line_start_pos: 0, cur: 0, tokens: tokens, options: {}, error: [] };
+        return tokens[tokens.length - 1].type == TokenType.Eof ? minify_token(tokens) : code; //没有被正常的解析结束
+    }
+
     export function styles(code: string, options?: Options, out_errors?: FormatError[]) {
         if (!code) return code;
         code += "";
