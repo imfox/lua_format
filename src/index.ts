@@ -267,9 +267,6 @@ namespace lua_sytles {
         }
     }
 
-    const prespace = ['%', '&', '*', '+', '-', '..', '/', '//', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|', '~='];
-    const sufspace = ['%', '&', '*', '+', ',', '-', '..', '/', '//', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|', '~='];
-
     let open = ['(', '[', 'do', 'function', 'if', 'repeat', '{'];
     let close = [')', ']', 'end', 'until', '}'];
 
@@ -352,6 +349,9 @@ namespace lua_sytles {
         return 0;
     }
 
+    const prespace = ['%', '&', '*', '+', '-', '..', '/', '//', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'end', 'or', 'return', 'then', '|', '~='];
+    const sufspace = ['%', '&', '*', '+', ',', '..', '/', '//', ';', '<', '<<', '<=', '=', '==', '>', '>=', '>>', '^', 'and', 'do', 'else', 'elseif', 'end', 'for', 'goto', 'if', 'local', 'not', 'or', 'repeat', 'return', 'then', 'until', 'while', '|', '~='];
+
     function format_token(tokens: IToken[], formatstate?: FormatState) {
         let tabs = [];
         let tab = 0;
@@ -363,7 +363,7 @@ namespace lua_sytles {
         let limit = tokens.length;
         while (fs.cur < tokens.length && --limit >= 0) {
             let { value: tk, type: tt } = tokens[fs.cur];
-            let ntk: string, ntt: TokenType;
+            let ntk: string, ntt!: TokenType;
             if (fs.cur + 1 < tokens.length) { //next
                 ntk = tokens[fs.cur + 1].value;
                 ntt = tokens[fs.cur + 1].type;
@@ -418,13 +418,20 @@ namespace lua_sytles {
                 if (!is_line_end) {
                     if (tk == ")" || tk == "}" || tk == "]" || tk == "end") {
                         if (!(!ntk! || ntk == "." || ntk == "(" || ntk == ")" || ntk == "{" || ntk == "}" || ntk == "[" || ntk == "]" || ntk == "," || ntk == ";" || ntk == ":")) {
-                            try_add_space()
+                            try_add_space();
                         }
-                    } else if (sufspace.indexOf(tk) >= 0) {
-                        try_add_space()
+                    } else if (sufspace.includes(tk)) {
+                        try_add_space();
+                    } else if (tk == "-") {
+                        let ltk = tokens[fs.cur - 1].value;
+                        if (TokenType.ID == ntt || (TokenType.Number == ntt && ntk!.charAt(0) != "-")) {
+                            if (!["==", "~=", ">", "<", ">=", "<=", "+", "-", "*", "/", "=", "^", "%"].includes(ltk))
+                                try_add_space();
+                        } else
+                            try_add_space();
                     } else {
-                        if ([TokenType.String, TokenType.Number, TokenType.ID].indexOf(tt) >= 0 && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt!) >= 0) { //这里错误了
-                            try_add_space()
+                        if ([TokenType.String, TokenType.Number, TokenType.ID].includes(tt) && [TokenType.String, TokenType.Number, TokenType.ID].indexOf(ntt!) >= 0) { //这里错误了
+                            try_add_space();
                         }
                     }
                 }
